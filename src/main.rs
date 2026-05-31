@@ -60,23 +60,25 @@ pub mod err;
 pub mod op;
 #[cfg(test)]
 pub mod tests;
-pub mod ext;
 
 use std::collections::VecDeque;
 use std::hint::{cold_path, unreachable_unchecked};
-use std::ops::ControlFlow;
+use std::io::{Read as _, stdin};
+use std::str::FromStr as _;
 
 use crate::err::Status;
 use crate::op::Opcode;
 
 pub fn main() {
 	let mut program: Program = const { Program::default() };
-	program.run();
-	program.get_char();
+	let _ = program.run();
+	dbg!(program.get_char(Some(0)));
+	dbg!(program.get_int(Some(1)));
+	dbg!(program.mem);
 }
 
 pub type MemAddr = u8;
-pub type MemVal = u64;
+pub type MemVal = u32;
 const _: () = assert!(
 	size_of::<MemAddr>() <= size_of::<usize>(),
 	"MemAddr is used to index an array, and therefore cannot be larger than `usize`!",
@@ -110,7 +112,7 @@ pub struct Program {
 impl const Default for Program {
 	fn default() -> Self {
 		Self {
-			mem: [0; 32],
+			mem: [0; _],
 			stack: VecDeque::new(),
 			instructions: VecDeque::new(),
 		}
@@ -138,34 +140,37 @@ impl Program {
 }
 
 impl Program {
-	pub fn run(&mut self) {
+	#[must_use]
+	pub fn run(&mut self) -> Status {
 		loop {
-			let ControlFlow::Break(status): ControlFlow<Status> = self.step() else {
-				continue;
-			};
-			if status == Status::NoFurtherInstructions {
-				break;
-			};
+			propagate!(self.step());
 		}
 	}
 
-	pub fn step(&mut self) -> ControlFlow<Status> {
+	pub fn step(&mut self) -> Status {
 		if self.instructions.is_empty() {
-			brk!(NoFurtherInstructions);
+			return Status::NoFurtherInstructions;
 		};
-		let opcode: Opcode = self
-			.instructions
-			.pop_front()
-			// SAFETY: We've already determined that self.instructions is not empty.
-			.unwrap_or_else(|| unreachable!());
+		let opcode: Opcode = self.instructions.pop_front().unwrap_or_else(|| {
+			cold_path();
+			// SAFETY: [`self.instructions`] is not empty at this point, therefore this is unreachable.
+			// SAFETY:
+			// Problem(s):
+			// - `unreachable_unchecked()` is unsafe, and it is Undefined Behaviour for it to be reached.
+			// Excuse(s):
+			// - This statement cannot be reached.
+			unsafe {
+				unreachable_unchecked();
+			};
+		});
 		self.execute(&opcode)
 	}
 }
 
 impl Program {
-	pub fn execute(&mut self, opcode: &Opcode) -> ControlFlow<Status> {
+	pub fn execute(&mut self, opcode: &Opcode) -> Status {
 		match *opcode {
-			Opcode::Abort => brk!(ProgramAbort),
+			Opcode::Abort => return Status::ProgramAbort,
 			Opcode::Load(addr) => self.load(addr),
 			Opcode::Store(addr) => self.store(addr),
 			Opcode::StackDup => self.stack_dup(),
@@ -173,13 +178,15 @@ impl Program {
 				let _ = self.stack_pop();
 			},
 			Opcode::MemSet(addr, value) => self.mem_set(addr, value),
-			Opcode::GetChar => self.get_char(),
-			Opcode::Add => self.add(),
-			Opcode::Sub => self.sub(),
-			Opcode::Mul => self.mul(),
-			Opcode::Div => self.div(),
+			Opcode::MemClear => self.mem_clear(),
+			Opcode::GetChar(dest) => propagate!(self.get_char(dest)),
+			Opcode::GetInt(dest) => propagate!(self.get_int(dest)),
+			Opcode::Add(dest) => self.add(dest),
+			Opcode::Sub(dest) => self.sub(dest),
+			Opcode::Mul(dest) => self.mul(dest),
+			Opcode::Div(dest) => self.div(dest),
 		};
-		ControlFlow::Continue(())
+		Status::OK
 	}
 
 	pub fn load(&mut self, addr: MemAddr) {
@@ -211,43 +218,72 @@ impl Program {
 		self.mem[usize::from(addr)] = value;
 	}
 
-	pub fn get_char(&mut self) {
-		// SAFETY: TODO
-		let input: i32 = unsafe {
-			dbg!(ext::getchar())
+	pub const fn mem_clear(&mut self) {
+		self.mem = [0; _];
+	}
+
+	pub fn get_char(&mut self, dest: Option<MemAddr>) -> Status {
+		let [value, ..]: [u8; _] = {
+			const NUM_CHARS: usize = cfg_select! {
+				windows => 3,
+				_ => 2,
+			};
+			// eat '\n' as well as character
+			let mut buf: [u8; NUM_CHARS] = [0; _];
+			if stdin().read_exact(&mut buf).is_err() {
+				return Status::InvalidInput;
+			};
+			buf
 		};
-		// EOF(3const): "EOF represents the end of an input file, or an error indication.  It is a negative value, of type int."
-		assert!(input >= 0, "Stream reached EOF!");
-		let input: u32 = input.cast_unsigned();
-		dbg!(input);
-		// #[allow(unreachable_code, clippy::diverging_sub_expression)]
-		// self.stack_push(todo!("`fgetc(stdin)`"));
+		self.op_result_store(dest, MemVal::from(value));
+		Status::OK
 	}
 
-	pub fn add(&mut self) {
-		let (lhs, rhs): (MemVal, MemVal) = self.collect_int_params();
-		self.stack_push(lhs.wrapping_add(rhs));
+	pub fn get_int(&mut self, dest: Option<MemAddr>) -> Status {
+		let mut buf: String = String::new();
+		if stdin().read_line(&mut buf).is_err() {
+			return Status::InvalidInput;
+		};
+		let Ok(value): Result<MemVal, _> = MemVal::from_str(buf.trim()) else {
+			return Status::InvalidInput;
+		};
+		self.op_result_store(dest, value);
+		Status::OK
 	}
 
-	pub fn sub(&mut self) {
+	pub fn add(&mut self, dest: Option<MemAddr>) {
 		let (lhs, rhs): (MemVal, MemVal) = self.collect_int_params();
-		self.stack_push(lhs.wrapping_sub(rhs));
+		self.op_result_store(dest, lhs.wrapping_add(rhs));
 	}
 
-	pub fn mul(&mut self) {
+	pub fn sub(&mut self, dest: Option<MemAddr>) {
 		let (lhs, rhs): (MemVal, MemVal) = self.collect_int_params();
-		self.stack_push(lhs.wrapping_mul(rhs));
+		self.op_result_store(dest, lhs.wrapping_sub(rhs));
 	}
 
-	pub fn div(&mut self) {
+	pub fn mul(&mut self, dest: Option<MemAddr>) {
 		let (lhs, rhs): (MemVal, MemVal) = self.collect_int_params();
-		self.stack_push(lhs.wrapping_div(rhs));
+		self.op_result_store(dest, lhs.wrapping_mul(rhs));
+	}
+
+	pub fn div(&mut self, dest: Option<MemAddr>) {
+		let (lhs, rhs): (MemVal, MemVal) = self.collect_int_params();
+		self.op_result_store(dest, lhs.wrapping_div(rhs));
+	}
+
+	fn op_result_store(&mut self, dest: Option<MemAddr>, value: MemVal) {
+		if let Some(dest) = dest {
+			self.mem_set(dest, value);
+		} else {
+			self.stack_push(value);
+		};
 	}
 
 	#[must_use]
 	fn collect_int_params(&mut self) -> (MemVal, MemVal) {
 		let [lhs, rhs]: [MemVal] = *self.collect_parameters(2) else {
 			cold_path();
+			// SAFETY: [`Self::collect_parameters()`] would've panicked if it couldn't collect exactly two parameters, therefore this is unreachable.
 			// SAFETY:
 			// Problem(s):
 			// - `unreachable_unchecked()` is unsafe, and it is Undefined Behaviour for it to be reached.
