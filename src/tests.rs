@@ -16,17 +16,44 @@ macro_rules! test_program {
 
 #[test]
 fn add() {
+	const FIRST: MemVal = MemVal::MAX;
+	const SECOND: MemVal = 5;
+	const THIRD: MemVal = FIRST.wrapping_add(SECOND);
+
 	let mut program: Program = test_program!(
+		Opcode::MemSet(0, FIRST),
+		Opcode::MemSet(1, SECOND),
+		Opcode::Load(2),
+		Opcode::Load(3),
 		Opcode::Load(0),
 		Opcode::Load(1),
-		Opcode::Add(None),
-		Opcode::Store(2),
+		Opcode::Add(Some(2)),
 	);
-	program.mem[0] = MemVal::MAX;
-	program.mem[1] = 5;
 	assert_eq!(program.run(), Status::NoFurtherInstructions);
-	assert_eq!(program.step(), Status::NoFurtherInstructions,);
-	assert_eq!(program.mem[0], MemVal::MAX);
-	assert_eq!(program.mem[1], 5);
-	assert_eq!(program.mem[2], 4);
+	assert_eq!(program.step(), Status::NoFurtherInstructions);
+	assert_eq!(program.mem[0], FIRST);
+	assert_eq!(program.mem[1], SECOND);
+	assert_eq!(program.mem[2], THIRD);
+}
+
+#[test]
+fn sub() {
+	const FIRST: MemVal = MemVal::MIN;
+	const SECOND: MemVal = 5;
+	const THIRD: MemVal = FIRST.wrapping_sub(SECOND);
+
+	let mut program: Program = test_program!(
+		Opcode::MemSet(0, FIRST),
+		Opcode::MemSet(1, SECOND),
+		Opcode::Load(2),
+		Opcode::Load(3),
+		Opcode::Load(0),
+		Opcode::Load(1),
+		Opcode::Sub(Some(2)),
+	);
+	assert_eq!(program.run(), Status::NoFurtherInstructions);
+	assert_eq!(program.step(), Status::NoFurtherInstructions);
+	assert_eq!(program.mem[0], FIRST);
+	assert_eq!(program.mem[1], SECOND);
+	assert_eq!(program.mem[2], THIRD);
 }

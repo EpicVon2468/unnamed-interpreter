@@ -63,7 +63,7 @@ pub mod tests;
 
 use std::collections::VecDeque;
 use std::hint::{cold_path, unreachable_unchecked};
-use std::io::{Read as _, stdin};
+use std::io::stdin;
 use std::str::FromStr as _;
 
 use crate::err::Status;
@@ -127,15 +127,7 @@ impl Program {
 
 	#[must_use]
 	pub fn collect_parameters(&mut self, n: usize) -> Vec<MemVal> {
-		let mut params: Vec<MemVal> = Vec::with_capacity(n);
-		{
-			let mut index: usize = 0;
-			while index < n {
-				params.push(self.stack_pop());
-				index += 1;
-			}
-		};
-		params
+		self.stack.drain((self.stack.len() - n)..).collect()
 	}
 }
 
@@ -153,7 +145,7 @@ impl Program {
 		};
 		let opcode: Opcode = self.instructions.pop_front().unwrap_or_else(|| {
 			cold_path();
-			// SAFETY: [`self.instructions`] is not empty at this point, therefore this is unreachable.
+			// SANITY: [`self.instructions`] is not empty at this point, therefore this is unreachable.
 			// SAFETY:
 			// Problem(s):
 			// - `unreachable_unchecked()` is unsafe, and it is Undefined Behaviour for it to be reached.
@@ -223,25 +215,29 @@ impl Program {
 	}
 
 	pub fn get_char(&mut self, dest: Option<MemAddr>) -> Status {
-		let [value, ..]: [u8; _] = {
-			const NUM_CHARS: usize = cfg_select! {
-				windows => 3,
-				_ => 2,
-			};
-			// eat '\n' as well as character
-			let mut buf: [u8; NUM_CHARS] = [0; _];
-			if stdin().read_exact(&mut buf).is_err() {
-				return Status::InvalidInput;
-			};
-			buf
+		let mut buf: String = String::new();
+		// SANITY: Only empty on `EOF`, otherwise it would be `\n` or `\r\n`.
+		if stdin().read_line(&mut buf).is_err() || buf.is_empty() {
+			return Status::InvalidInput;
 		};
+		// SAFETY:
+		// Problem(s):
+		// - Dereferencing pointers is unsafe.
+		// - If `buf` is empty, a segmentation fault occurs.
+		// Excuse(s):
+		// - `std` ensures the pointer being dereferenced is properly aligned, is not null, and is not invalid.
+		// - The enclosing function contains checks which perform an early return if `buf` is empty.
+		let value: u8 = unsafe {
+			*buf.trim().as_ptr()
+		};
+		dbg!(value);
 		self.op_result_store(dest, MemVal::from(value));
 		Status::OK
 	}
 
 	pub fn get_int(&mut self, dest: Option<MemAddr>) -> Status {
 		let mut buf: String = String::new();
-		if stdin().read_line(&mut buf).is_err() {
+		if stdin().read_line(&mut buf).is_err() || buf.is_empty() {
 			return Status::InvalidInput;
 		};
 		let Ok(value): Result<MemVal, _> = MemVal::from_str(buf.trim()) else {
@@ -283,7 +279,7 @@ impl Program {
 	fn collect_int_params(&mut self) -> (MemVal, MemVal) {
 		let [lhs, rhs]: [MemVal] = *self.collect_parameters(2) else {
 			cold_path();
-			// SAFETY: [`Self::collect_parameters()`] would've panicked if it couldn't collect exactly two parameters, therefore this is unreachable.
+			// SANITY: [`Self::collect_parameters()`] would've panicked if it couldn't collect exactly two parameters, therefore this is unreachable.
 			// SAFETY:
 			// Problem(s):
 			// - `unreachable_unchecked()` is unsafe, and it is Undefined Behaviour for it to be reached.
