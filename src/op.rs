@@ -12,6 +12,8 @@ pub enum Opcode {
 	/// Duplicate the head of the stack.
 	StackDup,
 	StackPop,
+	/// Clears the stack.
+	StackClear,
 	/// Store the [`literal value`][`MemValue`] into memory at `addr`.
 	MemSet(MemAddr, MemVal),
 	/// Clears all memory.  This is more efficient than manually using [`Self::MemSet`] to clear every value.

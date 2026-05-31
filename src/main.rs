@@ -144,8 +144,8 @@ impl Program {
 			return Status::NoFurtherInstructions;
 		};
 		let opcode: Opcode = self.instructions.pop_front().unwrap_or_else(|| {
-			cold_path();
 			// SANITY: [`self.instructions`] is not empty at this point, therefore this is unreachable.
+			cold_path();
 			// SAFETY:
 			// Problem(s):
 			// - `unreachable_unchecked()` is unsafe, and it is Undefined Behaviour for it to be reached.
@@ -169,6 +169,7 @@ impl Program {
 			Opcode::StackPop => {
 				let _ = self.stack_pop();
 			},
+			Opcode::StackClear => self.stack_clear(),
 			Opcode::MemSet(addr, value) => self.mem_set(addr, value),
 			Opcode::MemClear => self.mem_clear(),
 			Opcode::GetChar(dest) => propagate!(self.get_char(dest)),
@@ -194,7 +195,7 @@ impl Program {
 	// TODO: should this push_back `0` if no value already exists?
 	pub fn stack_dup(&mut self) {
 		let Some(value): Option<&MemVal> = self.stack.back() else {
-			// This isn't technically unlikely to occur, but sane programs should only be using stackdup when a value actually exists.
+			// SANITY: This isn't technically unlikely to occur, but sane programs should only be using stackdup when a value actually exists.
 			cold_path();
 			return;
 		};
@@ -202,8 +203,12 @@ impl Program {
 	}
 
 	#[must_use]
-	fn stack_pop(&mut self) -> MemVal {
+	pub fn stack_pop(&mut self) -> MemVal {
 		self.stack.pop_back().expect("Stack was empty!")
+	}
+
+	pub fn stack_clear(&mut self) {
+		self.stack.clear();
 	}
 
 	pub fn mem_set(&mut self, addr: MemAddr, value: MemVal) {
@@ -237,6 +242,7 @@ impl Program {
 
 	pub fn get_int(&mut self, dest: Option<MemAddr>) -> Status {
 		let mut buf: String = String::new();
+		// SANITY: Only empty on `EOF`, otherwise it would be `\n` or `\r\n`.
 		if stdin().read_line(&mut buf).is_err() || buf.is_empty() {
 			return Status::InvalidInput;
 		};
@@ -278,8 +284,8 @@ impl Program {
 	#[must_use]
 	fn collect_int_params(&mut self) -> (MemVal, MemVal) {
 		let [lhs, rhs]: [MemVal] = *self.collect_parameters(2) else {
-			cold_path();
 			// SANITY: [`Self::collect_parameters()`] would've panicked if it couldn't collect exactly two parameters, therefore this is unreachable.
+			cold_path();
 			// SAFETY:
 			// Problem(s):
 			// - `unreachable_unchecked()` is unsafe, and it is Undefined Behaviour for it to be reached.
