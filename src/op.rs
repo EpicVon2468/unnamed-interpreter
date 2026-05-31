@@ -17,4 +17,6 @@ pub enum Opcode {
 	GetChar,
 	Add,
 	Sub,
+	Mul,
+	Div,
 }

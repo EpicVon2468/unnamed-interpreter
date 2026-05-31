@@ -22,7 +22,7 @@ MSRV: N/A (nightly, see: [`rust-toolchain.toml`](https://github.com/EpicVon2468/
 [Release-GitHub]: https://img.shields.io/github/v/release/EpicVon2468/unnamed-interpreter?logo=github&label=github
 [Release-GitHub-1]: https://github.com/EpicVon2468/unnamed-interpreter/releases/latest/
 
-[Repository]: https://img.shields.io/badge/git-EpicVon2468/unnamed-interpreter-blue?logo=github
+[Repository]: https://img.shields.io/badge/git-EpicVon2468/unnamed--interpreter-blue?logo=github
 [Repository-1]: https://github.com/EpicVon2468/unnamed-interpreter/
 
 [Licence]: https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue

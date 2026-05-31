@@ -60,6 +60,7 @@ pub mod err;
 pub mod op;
 #[cfg(test)]
 pub mod tests;
+pub mod ext;
 
 use std::collections::VecDeque;
 use std::hint::{cold_path, unreachable_unchecked};
@@ -71,7 +72,7 @@ use crate::op::Opcode;
 pub fn main() {
 	let mut program: Program = const { Program::default() };
 	program.run();
-	dbg!(program);
+	program.get_char();
 }
 
 pub type MemAddr = u8;
@@ -122,6 +123,7 @@ impl Program {
 		self.stack.push_back(value);
 	}
 
+	#[must_use]
 	pub fn collect_parameters(&mut self, n: usize) -> Vec<MemVal> {
 		let mut params: Vec<MemVal> = Vec::with_capacity(n);
 		{
@@ -168,12 +170,14 @@ impl Program {
 			Opcode::Store(addr) => self.store(addr),
 			Opcode::StackDup => self.stack_dup(),
 			Opcode::StackPop => {
-				self.stack_pop();
+				let _ = self.stack_pop();
 			},
 			Opcode::MemSet(addr, value) => self.mem_set(addr, value),
 			Opcode::GetChar => self.get_char(),
 			Opcode::Add => self.add(),
 			Opcode::Sub => self.sub(),
+			Opcode::Mul => self.mul(),
+			Opcode::Div => self.div(),
 		};
 		ControlFlow::Continue(())
 	}
@@ -198,6 +202,7 @@ impl Program {
 		self.stack.push_back(*value);
 	}
 
+	#[must_use]
 	fn stack_pop(&mut self) -> MemVal {
 		self.stack.pop_back().expect("Stack was empty!")
 	}
@@ -207,8 +212,16 @@ impl Program {
 	}
 
 	pub fn get_char(&mut self) {
-		#[allow(unreachable_code, clippy::diverging_sub_expression)]
-		self.stack_push(todo!("`fgetc(stdin)`"));
+		// SAFETY: TODO
+		let input: i32 = unsafe {
+			dbg!(ext::getchar())
+		};
+		// EOF(3const): "EOF represents the end of an input file, or an error indication.  It is a negative value, of type int."
+		assert!(input >= 0, "Stream reached EOF!");
+		let input: u32 = input.cast_unsigned();
+		dbg!(input);
+		// #[allow(unreachable_code, clippy::diverging_sub_expression)]
+		// self.stack_push(todo!("`fgetc(stdin)`"));
 	}
 
 	pub fn add(&mut self) {
@@ -221,6 +234,17 @@ impl Program {
 		self.stack_push(lhs.wrapping_sub(rhs));
 	}
 
+	pub fn mul(&mut self) {
+		let (lhs, rhs): (MemVal, MemVal) = self.collect_int_params();
+		self.stack_push(lhs.wrapping_mul(rhs));
+	}
+
+	pub fn div(&mut self) {
+		let (lhs, rhs): (MemVal, MemVal) = self.collect_int_params();
+		self.stack_push(lhs.wrapping_div(rhs));
+	}
+
+	#[must_use]
 	fn collect_int_params(&mut self) -> (MemVal, MemVal) {
 		let [lhs, rhs]: [MemVal] = *self.collect_parameters(2) else {
 			cold_path();
