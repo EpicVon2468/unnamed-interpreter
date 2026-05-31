@@ -1,14 +1,20 @@
+use crate::{MemAddr, MemVal};
+
 #[derive(Debug)]
 #[derive_const(PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Opcode {
 	Abort,
-	// 'addr'
-	Load(u8),
-	// Store the top value in the stack into memory @ addr
-	// 'addr'
-	Store(u8),
+	/// Load the [`literal value`][`MemVal`] onto the stack.
+	Load(MemAddr),
+	/// Store the top value in the stack into memory at `addr`.
+	Store(MemAddr),
+	/// Duplicate the head of the stack.
 	StackDup,
+	StackPop,
+	/// Store the [`literal value`][`MemValue`] into memory at `addr`.
+	MemSet(MemAddr, MemVal),
+	GetChar,
 	Add,
 	Sub,
 }

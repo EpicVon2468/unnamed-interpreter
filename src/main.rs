@@ -58,6 +58,8 @@
 #![doc = include_str!("../README.md")]
 pub mod err;
 pub mod op;
+#[cfg(test)]
+pub mod tests;
 
 use std::collections::VecDeque;
 use std::hint::{cold_path, unreachable_unchecked};
@@ -67,30 +69,34 @@ use crate::err::Status;
 use crate::op::Opcode;
 
 pub fn main() {
-	let mut program: Program = Program {
-		instructions: [
-			Opcode::Load(0),
-			Opcode::Load(1),
-			Opcode::Add,
-			Opcode::Store(2),
-			Opcode::Abort,
-		]
-		.into(),
-		..Default::default()
-	};
-	program.mem[0] = MemVal::MAX;
-	program.mem[1] = 5;
+	let mut program: Program = const { Program::default() };
 	program.run();
 	dbg!(program);
 }
 
-type MemVal = u64;
+pub type MemAddr = u8;
+pub type MemVal = u64;
+const _: () = assert!(
+	size_of::<MemAddr>() <= size_of::<usize>(),
+	"MemAddr is used to index an array, and therefore cannot be larger than `usize`!",
+);
+#[allow(
+	clippy::absurd_extreme_comparisons,
+	clippy::cast_sign_loss,
+	clippy::as_conversions,
+	clippy::cast_possible_truncation,
+	unused_comparisons
+)]
+const _: () = assert!(
+	(f32::NEG_INFINITY as MemAddr) >= 0,
+	"MemAddr must be unsigned!",
+);
 
 #[derive(Debug)]
 pub struct Program {
-	// mem_addr : value
+	// MemAddr : MemVal
 	pub(crate) mem: [MemVal; 32],
-	// stack : value
+	// stack : MemVal
 	pub(crate) stack: VecDeque<MemVal>,
 	pub(crate) instructions: VecDeque<Opcode>,
 }
@@ -112,11 +118,8 @@ impl const Default for Program {
 
 impl Program {
 	fn stack_push(&mut self, value: MemVal) {
+		assert!(self.stack.len() < 16, "Tried to grow stack beyond maximum!");
 		self.stack.push_back(value);
-	}
-
-	fn stack_pop(&mut self) -> MemVal {
-		self.stack.pop_back().expect("Stack was empty!")
 	}
 
 	pub fn collect_parameters(&mut self, n: usize) -> Vec<MemVal> {
@@ -135,7 +138,7 @@ impl Program {
 impl Program {
 	pub fn run(&mut self) {
 		loop {
-			let ControlFlow::Break(status) = dbg!(self.step()) else {
+			let ControlFlow::Break(status): ControlFlow<Status> = self.step() else {
 				continue;
 			};
 			if status == Status::NoFurtherInstructions {
@@ -163,26 +166,49 @@ impl Program {
 			Opcode::Abort => brk!(ProgramAbort),
 			Opcode::Load(addr) => self.load(addr),
 			Opcode::Store(addr) => self.store(addr),
-			Opcode::StackDup => self.stackdup(),
+			Opcode::StackDup => self.stack_dup(),
+			Opcode::StackPop => {
+				self.stack_pop();
+			},
+			Opcode::MemSet(addr, value) => self.mem_set(addr, value),
+			Opcode::GetChar => self.get_char(),
 			Opcode::Add => self.add(),
 			Opcode::Sub => self.sub(),
 		};
 		ControlFlow::Continue(())
 	}
 
-	pub fn load(&mut self, addr: u8) {
+	pub fn load(&mut self, addr: MemAddr) {
 		self.stack_push(self.mem[usize::from(addr)]);
 	}
 
-	pub fn store(&mut self, addr: u8) {
-		self.mem[usize::from(addr)] = self.stack_pop();
+	pub fn store(&mut self, addr: MemAddr) {
+		// can't inline this variable due to borrowing rules
+		let value: MemVal = self.stack_pop();
+		self.mem_set(addr, value);
 	}
 
-	pub fn stackdup(&mut self) {
+	// TODO: should this push_back `0` if no value already exists?
+	pub fn stack_dup(&mut self) {
 		let Some(value): Option<&MemVal> = self.stack.back() else {
+			// This isn't technically unlikely to occur, but sane programs should only be using stackdup when a value actually exists.
+			cold_path();
 			return;
 		};
 		self.stack.push_back(*value);
+	}
+
+	fn stack_pop(&mut self) -> MemVal {
+		self.stack.pop_back().expect("Stack was empty!")
+	}
+
+	pub fn mem_set(&mut self, addr: MemAddr, value: MemVal) {
+		self.mem[usize::from(addr)] = value;
+	}
+
+	pub fn get_char(&mut self) {
+		#[allow(unreachable_code, clippy::diverging_sub_expression)]
+		self.stack_push(todo!("`fgetc(stdin)`"));
 	}
 
 	pub fn add(&mut self) {
