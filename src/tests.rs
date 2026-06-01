@@ -28,12 +28,14 @@ fn add() {
 		Opcode::Load(0),
 		Opcode::Load(1),
 		Opcode::Add(Some(2)),
+		Opcode::Add(Some(3)),
 	);
 	assert_eq!(program.run(), Status::NoFurtherInstructions);
 	assert_eq!(program.step(), Status::NoFurtherInstructions);
 	assert_eq!(program.mem[0], FIRST);
 	assert_eq!(program.mem[1], SECOND);
 	assert_eq!(program.mem[2], THIRD);
+	assert_eq!(program.mem[3], 0);
 }
 
 #[test]
@@ -50,10 +52,12 @@ fn sub() {
 		Opcode::Load(0),
 		Opcode::Load(1),
 		Opcode::Sub(Some(2)),
+		Opcode::Sub(Some(3)),
 	);
 	assert_eq!(program.run(), Status::NoFurtherInstructions);
 	assert_eq!(program.step(), Status::NoFurtherInstructions);
 	assert_eq!(program.mem[0], FIRST);
 	assert_eq!(program.mem[1], SECOND);
 	assert_eq!(program.mem[2], THIRD);
+	assert_eq!(program.mem[3], 0);
 }

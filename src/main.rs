@@ -64,6 +64,7 @@ pub mod tests;
 use std::collections::VecDeque;
 use std::hint::{cold_path, unreachable_unchecked};
 use std::io::stdin;
+use std::num::ParseIntError;
 use std::str::FromStr as _;
 
 use crate::err::Status;
@@ -139,6 +140,7 @@ impl Program {
 		}
 	}
 
+	#[must_use]
 	pub fn step(&mut self) -> Status {
 		if self.instructions.is_empty() {
 			return Status::NoFurtherInstructions;
@@ -159,6 +161,7 @@ impl Program {
 	}
 }
 
+// NOTE: Some usage of `cold_path()` is definitely excessive here, but I'd rather optimise intended usage at the expense of unintended & invalid usage.
 impl Program {
 	pub fn execute(&mut self, opcode: &Opcode) -> Status {
 		match *opcode {
@@ -219,10 +222,31 @@ impl Program {
 		self.mem = [0; _];
 	}
 
-	pub fn get_char(&mut self, dest: Option<MemAddr>) -> Status {
+	fn try_valid_input() -> Option<String> {
 		let mut buf: String = String::new();
-		// SANITY: Only empty on `EOF`, otherwise it would be `\n` or `\r\n`.
-		if stdin().read_line(&mut buf).is_err() || buf.is_empty() {
+		if stdin().read_line(&mut buf).is_err() {
+			return None;
+		};
+		// SANITY: Using " " instead of "" makes `str::replace()` use the fast ASCII replace path, which is also convenient as `str::trim()` is always called afterwards to clean up user-inputted whitespace from a line.
+		// NOTE: Without `str::trim()`, `buf` is only empty when `EOF` is passed to stdin, otherwise it is `\n` or `\r\n`.
+		let input: String = buf.replace('\n', " ").trim().into();
+		#[cfg(windows)]
+		let input: String = buf.replace('\r', "");
+		if input.is_empty() { None } else { Some(input) }
+	}
+
+	pub fn get_char(&mut self, dest: Option<MemAddr>) -> Status {
+		let Some(input): Option<String> = Self::try_valid_input() else {
+			return Status::InvalidInput;
+		};
+		// SANITY:
+		// `str::len()` is the total number of bytes, not the total number of chars.
+		// Normally, this kind of naïve check would unintentionally filter out multibyte characters (such as 'ﬀ', for which `str::len()` returns 3).
+		// However, in this case, the filtering behaviour is intentional.
+		// This function refuses multibyte character and multi-character input.
+		if input.len() != 1 {
+			// SANITY: Optimise for single-byte single-char input.
+			cold_path();
 			return Status::InvalidInput;
 		};
 		// SAFETY:
@@ -231,22 +255,20 @@ impl Program {
 		// - If `buf` is empty, a segmentation fault occurs.
 		// Excuse(s):
 		// - `std` ensures the pointer being dereferenced is properly aligned, is not null, and is not invalid.
-		// - The enclosing function contains checks which perform an early return if `buf` is empty.
-		let value: u8 = unsafe {
-			*buf.trim().as_ptr()
-		};
+		// - [`Self::try_valid_stdin`] ensures input is never empty.
+		let value: u8 = unsafe { *input.as_ptr() };
 		dbg!(value);
 		self.op_result_store(dest, MemVal::from(value));
 		Status::OK
 	}
 
 	pub fn get_int(&mut self, dest: Option<MemAddr>) -> Status {
-		let mut buf: String = String::new();
-		// SANITY: Only empty on `EOF`, otherwise it would be `\n` or `\r\n`.
-		if stdin().read_line(&mut buf).is_err() || buf.is_empty() {
+		let Some(input): Option<String> = Self::try_valid_input() else {
 			return Status::InvalidInput;
 		};
-		let Ok(value): Result<MemVal, _> = MemVal::from_str(buf.trim()) else {
+		let Ok(value): Result<MemVal, ParseIntError> = MemVal::from_str(&input) else {
+			// SANITY: Optimise for valid integer input.
+			cold_path();
 			return Status::InvalidInput;
 		};
 		self.op_result_store(dest, value);
