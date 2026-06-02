@@ -54,7 +54,15 @@
 	reason = "Shush"
 )]
 #![allow(clippy::borrowed_box)]
-#![feature(const_trait_impl, const_default, derive_const, const_cmp)]
+#![feature(
+	const_trait_impl,
+	const_default,
+	const_cmp,
+	const_option_ops,
+	const_convert,
+	const_result_trait_fn,
+	derive_const
+)]
 #![doc = include_str!("../README.md")]
 pub mod err;
 pub mod op;
@@ -80,10 +88,6 @@ pub fn main() {
 
 pub type MemAddr = u8;
 pub type MemVal = u32;
-const _: () = assert!(
-	size_of::<MemAddr>() <= size_of::<usize>(),
-	"MemAddr is used to index an array, and therefore cannot be larger than `usize`!",
-);
 #[allow(
 	clippy::absurd_extreme_comparisons,
 	clippy::cast_sign_loss,
@@ -91,15 +95,44 @@ const _: () = assert!(
 	clippy::cast_possible_truncation,
 	unused_comparisons
 )]
-const _: () = assert!(
-	(f32::NEG_INFINITY as MemAddr) >= 0,
-	"MemAddr must be unsigned!",
-);
+const _: () = {
+	assert!(
+		(f32::NEG_INFINITY as MemAddr) >= 0,
+		"MemAddr must be unsigned!",
+	);
+	assert!(
+		size_of::<MemAddr>() <= size_of::<usize>(),
+		"MemAddr is used to index an array, and therefore cannot be larger than `usize`!",
+	);
+};
+
+macro_rules! const_num_env {
+	($env:literal, $default:literal $(,)?) => {
+		const {
+			const fn mapper(value: &str) -> usize {
+				usize::from_str(value).unwrap_or($default)
+			}
+			let value: usize = option_env!($env).map_or($default, mapper);
+			assert!(
+				value >= 1,
+				concat!(
+					"Numeric environment variable '",
+					$env,
+					"' must be at least 1 in size!",
+				),
+			);
+			value
+		}
+	};
+}
+
+pub const MEM_SIZE: usize = const_num_env!("EMULATED_MEM_SIZE", 32);
+pub const STACK_SIZE: usize = const_num_env!("EMULATED_STACK_SIZE", 16);
 
 #[derive(Debug)]
 pub struct Program {
 	// MemAddr : MemVal
-	pub(crate) mem: [MemVal; 32],
+	pub(crate) mem: [MemVal; MEM_SIZE],
 	// stack : MemVal
 	pub(crate) stack: VecDeque<MemVal>,
 	pub(crate) instructions: VecDeque<Opcode>,
@@ -122,7 +155,10 @@ impl const Default for Program {
 
 impl Program {
 	fn stack_push(&mut self, value: MemVal) {
-		assert!(self.stack.len() < 16, "Tried to grow stack beyond maximum!");
+		assert!(
+			self.stack.len() < STACK_SIZE,
+			"Tried to grow stack beyond maximum!",
+		);
 		self.stack.push_back(value);
 	}
 
