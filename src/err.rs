@@ -1,9 +1,11 @@
 #[derive(Debug)]
 #[derive_const(PartialEq, Eq)]
+#[must_use]
+#[non_exhaustive]
 pub enum Status {
 	OK,
 	ProgramAbort,
-	NoFurtherInstructions,
+	ProgramComplete,
 	InvalidInput,
 }
 

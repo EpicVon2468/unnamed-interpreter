@@ -67,12 +67,10 @@
 pub mod err;
 pub mod op;
 #[cfg(test)]
-pub mod tests;
+mod tests;
 
 use std::collections::VecDeque;
-use std::hint::{cold_path, unreachable_unchecked};
-use std::io::stdin;
-use std::num::ParseIntError;
+use std::hint::unreachable_unchecked;
 use std::str::FromStr as _;
 
 use crate::err::Status;
@@ -81,8 +79,8 @@ use crate::op::Opcode;
 pub fn main() {
 	let mut program: Program = const { Program::default() };
 	let _ = program.run();
-	dbg!(program.get_char(Some(0)));
-	dbg!(program.get_int(Some(1)));
+	let _ = dbg!(program.get_char(Some(0)));
+	let _ = dbg!(program.get_int(Some(1)));
 	dbg!(program.mem);
 }
 
@@ -114,11 +112,11 @@ macro_rules! const_num_env {
 			}
 			let value: usize = option_env!($env).map_or($default, mapper);
 			assert!(
-				value >= 1,
+				value >= 8,
 				concat!(
 					"Numeric environment variable '",
 					$env,
-					"' must be at least 1 in size!",
+					"' must be at least 8 in size!",
 				),
 			);
 			value
@@ -132,10 +130,10 @@ pub const STACK_SIZE: usize = const_num_env!("EMULATED_STACK_SIZE", 16);
 #[derive(Debug)]
 pub struct Program {
 	// MemAddr : MemVal
-	pub(crate) mem: [MemVal; MEM_SIZE],
+	mem: [MemVal; MEM_SIZE],
 	// stack : MemVal
-	pub(crate) stack: VecDeque<MemVal>,
-	pub(crate) instructions: VecDeque<Opcode>,
+	stack: VecDeque<MemVal>,
+	instructions: VecDeque<Opcode>,
 }
 
 #[rustfmt::skip]
@@ -169,21 +167,18 @@ impl Program {
 }
 
 impl Program {
-	#[must_use]
 	pub fn run(&mut self) -> Status {
 		loop {
 			propagate!(self.step());
 		}
 	}
 
-	#[must_use]
 	pub fn step(&mut self) -> Status {
 		if self.instructions.is_empty() {
-			return Status::NoFurtherInstructions;
+			return Status::ProgramComplete;
 		};
 		let opcode: Opcode = self.instructions.pop_front().unwrap_or_else(|| {
 			// SANITY: [`self.instructions`] is not empty at this point, therefore this is unreachable.
-			cold_path();
 			// SAFETY:
 			// Problem(s):
 			// - `unreachable_unchecked()` is unsafe, and it is Undefined Behaviour for it to be reached.
@@ -197,7 +192,6 @@ impl Program {
 	}
 }
 
-// NOTE: Some usage of `cold_path()` is definitely excessive here, but I'd rather optimise intended usage at the expense of unintended & invalid usage.
 impl Program {
 	pub fn execute(&mut self, opcode: &Opcode) -> Status {
 		match *opcode {
@@ -234,8 +228,6 @@ impl Program {
 	// TODO: should this push_back `0` if no value already exists?
 	pub fn stack_dup(&mut self) {
 		let Some(value): Option<&MemVal> = self.stack.back() else {
-			// SANITY: This isn't technically unlikely to occur, but sane programs should only be using stackdup when a value actually exists.
-			cold_path();
 			return;
 		};
 		self.stack.push_back(*value);
@@ -258,7 +250,10 @@ impl Program {
 		self.mem = [0; _];
 	}
 
+	#[cfg(all(not(test), not(miri)))]
 	fn try_valid_input() -> Option<String> {
+		use std::io::stdin;
+
 		let mut buf: String = String::new();
 		if stdin().read_line(&mut buf).is_err() {
 			return None;
@@ -271,6 +266,7 @@ impl Program {
 		if input.is_empty() { None } else { Some(input) }
 	}
 
+	#[cfg(all(not(test), not(miri)))]
 	pub fn get_char(&mut self, dest: Option<MemAddr>) -> Status {
 		let Some(input): Option<String> = Self::try_valid_input() else {
 			return Status::InvalidInput;
@@ -281,8 +277,6 @@ impl Program {
 		// However, in this case, the filtering behaviour is intentional.
 		// This function refuses multibyte character and multi-character input.
 		if input.len() != 1 {
-			// SANITY: Optimise for single-byte single-char input.
-			cold_path();
 			return Status::InvalidInput;
 		};
 		// SAFETY:
@@ -298,16 +292,25 @@ impl Program {
 		Status::OK
 	}
 
+	#[cfg(any(miri, test))]
+	pub const fn get_char(&mut self, _dest: Option<MemAddr>) -> Status {
+		Status::OK
+	}
+
+	#[cfg(all(not(test), not(miri)))]
 	pub fn get_int(&mut self, dest: Option<MemAddr>) -> Status {
 		let Some(input): Option<String> = Self::try_valid_input() else {
 			return Status::InvalidInput;
 		};
-		let Ok(value): Result<MemVal, ParseIntError> = MemVal::from_str(&input) else {
-			// SANITY: Optimise for valid integer input.
-			cold_path();
+		let Ok(value): Result<MemVal, _> = MemVal::from_str(&input) else {
 			return Status::InvalidInput;
 		};
 		self.op_result_store(dest, value);
+		Status::OK
+	}
+
+	#[cfg(any(miri, test))]
+	pub const fn get_int(&mut self, _dest: Option<MemAddr>) -> Status {
 		Status::OK
 	}
 
@@ -343,7 +346,6 @@ impl Program {
 	fn collect_int_params(&mut self) -> (MemVal, MemVal) {
 		let [lhs, rhs]: [MemVal] = *self.collect_parameters(2) else {
 			// SANITY: [`Self::collect_parameters()`] would've panicked if it couldn't collect exactly two parameters, therefore this is unreachable.
-			cold_path();
 			// SAFETY:
 			// Problem(s):
 			// - `unreachable_unchecked()` is unsafe, and it is Undefined Behaviour for it to be reached.
